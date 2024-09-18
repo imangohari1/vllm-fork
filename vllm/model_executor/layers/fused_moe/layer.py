@@ -202,8 +202,14 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         if is_hpu():
-            from vllm.hpu.ops import StaticFusedMOE
-            self.hpu_static_fused_moe = StaticFusedMOE(self.num_experts)
+            from vllm.hpu.ops import StaticFusedMOE, DynamicFusedMOE
+            from vllm.model_executor.layers.quantization.inc import INCConfig
+            selected_fused_moe = (
+                StaticFusedMOE
+                if isinstance(quant_config, INCConfig)
+                else DynamicFusedMOE
+            )
+            self.hpu_static_fused_moe = selected_fused_moe(self.num_experts)
 
         if quant_config is None:
             self.quant_method: Optional[QuantizeMethodBase] = (
@@ -254,24 +260,25 @@ class FusedMoE(torch.nn.Module):
             shard_size = self.intermediate_size_per_partition
             shard = slice(tp_rank * shard_size, (tp_rank + 1) * shard_size)
 
+            from vllm.hpu.ops import StaticFusedMOE
             # w1, gate_proj case: Load into first shard of w13.
             if shard_id == 0:
                 param_data[expert_id,
                            0:shard_size, :] = loaded_weight[shard, :]
-                if is_hpu():
+                if is_hpu() and isinstance(self.hpu_static_fused_moe, StaticFusedMOE):
                     self.hpu_static_fused_moe.w13_list[expert_id].set_weight(
                         param_data[expert_id])
             # w3, up_proj case: Load into second shard of w13.
             elif shard_id == 2:
                 param_data[expert_id, shard_size:2 *
                            shard_size, :] = loaded_weight[shard, :]
-                if is_hpu():
+                if is_hpu() and isinstance(self.hpu_static_fused_moe, StaticFusedMOE):
                     self.hpu_static_fused_moe.w13_list[expert_id].set_weight(
                         param_data[expert_id])
             # w2, down_proj case: Load into only shard of w2.
             elif shard_id == 1:
                 param_data[expert_id, :, :] = loaded_weight[:, shard]
-                if is_hpu():
+                if is_hpu() and isinstance(self.hpu_static_fused_moe, StaticFusedMOE):
                     self.hpu_static_fused_moe.w2_list[expert_id].set_weight(
                         param_data[expert_id])
             else:
