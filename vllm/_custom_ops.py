@@ -8,14 +8,11 @@ from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-if importlib.util.find_spec("habana_frameworks") is None:
-   try:
-       import habana_frameworks.torch.hpu as hthpu
-   except ImportError:
-       try:
-            import vllm._C
-       except ImportError as e:
-            logger.warning("Failed to import from vllm._C with %r", e)
+try:
+    if importlib.util.find_spec("habana_frameworks") is None:
+        import vllm._C
+except ImportError as e:
+    logger.warning("Failed to import from vllm._C with %r", e)
 
 with contextlib.suppress(ImportError):
     import vllm._moe_C
