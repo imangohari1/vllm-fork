@@ -1071,7 +1071,7 @@ def test_rotary_embedding_long_context(dist_init, num_loras, device,
     _, index_mapping, prompt_mapping = create_random_inputs(
         active_lora_ids=[0],
         num_inputs=batch_size,
-        input_size=(seq_len, max_position),
+        input_size=(1, max_position),
         input_range=(0, lora_config.lora_extra_vocab_size),
         input_type=torch.bfloat16,
     )
