@@ -177,6 +177,11 @@ def mixtral_lora_files():
 
 
 @pytest.fixture(scope="session")
+def mixtral_lora_files_all_target_modules():
+    return snapshot_download(repo_id="dyang415/mixtral-lora-v0")
+
+
+@pytest.fixture(scope="session")
 def gemma_lora_files():
     return snapshot_download(repo_id="wskwon/gemma-7b-test-lora")
 
@@ -195,6 +200,11 @@ def baichuan_lora_files():
 def baichuan_zero_lora_files():
     # all the lora_B weights are initialized to zero.
     return snapshot_download(repo_id="jeeejeee/baichuan7b-zero-init")
+
+
+@pytest.fixture(scope="session")
+def baichuan_regex_lora_files():
+    return snapshot_download(repo_id="jeeejeee/baichuan-7b-lora-zero-regex")
 
 
 @pytest.fixture(scope="session")
@@ -262,7 +272,7 @@ def llama_2_7b_engine_extra_embeddings():
                              **kwargs)
 
     if current_platform.is_hpu():
-        with patch("vllm.worker.habana_model_runner.get_model",
+        with patch("vllm.worker.hpu_model_runner.get_model",
                    get_model_patched):
             engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
     else:

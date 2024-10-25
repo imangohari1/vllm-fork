@@ -200,13 +200,13 @@ class Sampler(nn.Module):
         self._do_penalties = do_penalties
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
-        self._top_p_scalar = sampling_tensors.top_ps[0].item()
-        self._top_k_scalar = sampling_tensors.top_ks[0].item()
+        self._top_p_scalar = sampling_tensors.top_ps[0]
+        self._top_k_scalar = sampling_tensors.top_ks[0]
         scalar_p = torch.all(sampling_tensors.top_ps == self._top_p_scalar)
         scalar_k = torch.all(sampling_tensors.top_ks == self._top_k_scalar)
-        self._scalar_p_and_k = (scalar_p and scalar_k).item()
-        if self._scalar_p_and_k and self._do_top_p_top_k:
-            self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
+        self._scalar_p_and_k = torch.logical_and(scalar_p, scalar_k)
+
+        self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
 
     def forward(
         self,
@@ -266,13 +266,13 @@ class Sampler(nn.Module):
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
-            if self._scalar_p_and_k:
-                logits = self._apply_top_k_top_p_opt(logits,
-                                                     self._top_p_scalar,
-                                                     self._top_k_scalar)
-            else:
-                logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
-                                            sampling_tensors.top_ks)
+            # If we have a scalar p and k, we can use the optimized version.
+            logits = torch.where(
+                self._scalar_p_and_k,
+                self._apply_top_k_top_p_opt(logits, self._top_p_scalar,
+                                            self._top_k_scalar),
+                _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+                                   sampling_tensors.top_ks))
 
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
@@ -616,7 +616,7 @@ def _random_sample(
         same as the length of selected_seq_groups. If the corresponding
         seq_group has do_sample=False, tuple contains ([], [])
     """
-    # Find the maximum best_of value of the prompt phase requests.
+    # Find the maximum n value of the prompt phase requests.
     random_samples = random_samples.cpu()
     sample_idx = 0
     results: SampleResultType = []
@@ -631,9 +631,9 @@ def _random_sample(
         num_parent_seqs = len(seq_ids)
         if is_prompt:
             # Prompt phase.
-            parent_ids = [0] * sampling_params.best_of
+            parent_ids = [0] * sampling_params.n
             next_token_ids = random_samples[
-                sample_idx, :sampling_params.best_of].tolist()
+                sample_idx, :sampling_params.n].tolist()
         else:
             # Generation phase.
             parent_ids = list(range(num_parent_seqs))
@@ -678,7 +678,7 @@ def _beam_search_sample(
         is_prompt = seq_group.is_prompt
         seq_ids, sampling_params = seq_group.seq_ids, seq_group.sampling_params
         num_parent_seqs = len(seq_ids)
-        beam_width = sampling_params.best_of
+        beam_width = sampling_params.n
         seq_group_logprobs = logprobs[sample_idx:sample_idx + num_parent_seqs]
         if is_prompt:
             # Prompt phase.
@@ -905,12 +905,11 @@ def _sample_with_torch(
                                              greedy_samples)
 
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
-            max_best_of_in_batch = 1
+            max_n_in_batch = 1
             for seq_group in seq_groups:
                 if seq_group.is_prompt:
                     sampling_params = seq_group.sampling_params
-                    max_best_of_in_batch = max(max_best_of_in_batch,
-                                               sampling_params.best_of)
+                    max_n_in_batch = max(max_n_in_batch, sampling_params.n)
             seq_groups_arg = (None if sampling_type == SamplingType.RANDOM else
                               seq_groups)
 
@@ -920,13 +919,13 @@ def _sample_with_torch(
                         probs[long_sample_indices],
                         sampling_tensors.top_ks[long_sample_indices],
                         sampling_tensors.top_ps[long_sample_indices],
-                        max_best_of_in_batch,
+                        max_n_in_batch,
                         seq_groups_arg,
                     )
             else:
                 multinomial_samples[sampling_type] = _multinomial(
                     probs[long_sample_indices],
-                    max_best_of_in_batch,
+                    max_n_in_batch,
                     seq_groups=seq_groups_arg)
 
             if sampled_token_ids_tensor is not None:
@@ -1055,8 +1054,6 @@ def get_logprobs(
     # largest num logprobs in this API. If every logprobs is None, it will be
     # set to -1.
     largest_num_logprobs = -1
-    # If beam search is enabled.
-    use_beam_search = False
 
     # Select indices to compute logprob from, ranks of token ids, and the top
     # k token ids from logprobs.
@@ -1089,8 +1086,6 @@ def get_logprobs(
                 largest_num_logprobs = max(largest_num_logprobs,
                                            sampling_params.logprobs)
 
-            use_beam_search = use_beam_search or sampling_params.use_beam_search
-
         assert len(next_token_ids) == len(query_indices)
 
     if len(query_indices) == 0:
@@ -1103,7 +1098,7 @@ def get_logprobs(
 
     # If largest_num_logprobs == -1, i.e. no logprobs are requested, we can
     # skip the whole logprob calculation.
-    if largest_num_logprobs >= 0 or use_beam_search:
+    if largest_num_logprobs >= 0:
         query_indices_gpu = torch.tensor(query_indices, device=logprobs.device)
         next_token_ids_gpu = torch.tensor(next_token_ids,
                                           device=logprobs.device)
@@ -1229,13 +1224,12 @@ def _get_sampled_logprob_if_needed(
     """Compute the sample logprob if needed."""
     seq_ids = seq_group.seq_ids
     num_logprobs = seq_group.sampling_params.logprobs
-    use_beam_search = seq_group.sampling_params.use_beam_search
     sampled_logprobs: SampleLogprobs = []
     next_token_ids, parent_seq_ids = sample_result
 
     if seq_group.do_sample:
         assert len(next_token_ids) > 0
-        if num_logprobs is None and not use_beam_search:
+        if num_logprobs is None:
             for next_token_id in next_token_ids:
                 # Use a dummy logprob
                 sampled_logprobs.append({next_token_id: Logprob(inf)})
