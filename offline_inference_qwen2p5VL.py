@@ -45,7 +45,8 @@ def main():
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=200)
 
     # Create an LLM.
-    mdl = "Qwen/Qwen2.5-VL-3B-Instruct"
+    #mdl = "Qwen/Qwen2.5-VL-3B-Instruct"
+    mdl = "models/Qwen2.5-VL-3B-Instruct/"
 
     llm = LLM(model=mdl)
     # Generate texts from the prompts. The output is a list of RequestOutput objects

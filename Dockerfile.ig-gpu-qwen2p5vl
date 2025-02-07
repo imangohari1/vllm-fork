@@ -1,0 +1,23 @@
+FROM nvcr.io/nvidia/pytorch:24.12-py3
+
+# intel proxies
+ENV PROXY="proxy-dmz.intel.com:911"
+ENV http_proxy="http://$PROXY"
+ENV https_proxy="http://$PROXY"
+ENV HTTP_PROXY="http://$PROXY"
+ENV HTTPS_PROXY="http://$PROXY"
+ENV NO_PROXY=127.0.0.1,*.intel.com
+
+RUN git clone https://github.com/imangohari1/vllm-fork.git -b ig/v0.7.1-withQwen /workspace/vllm
+
+RUN git clone https://github.com/huggingface/transformers.git  /workspace/transformers
+
+WORKDIR /workspace/vllm
+RUN VLLM_USE_PRECOMPILED=1 pip install --editable .
+
+WORKDIR /workspace/transformers
+RUN pip install . 
+
+WORKDIR /workspace/vllm
+
+RUN huggingface-cli download --cache-dir ./ --local-dir-use-symlinks False --revision main --local-dir models/Qwen2.5-VL-3B-Instruct Qwen/Qwen2.5-VL-3B-Instruct
