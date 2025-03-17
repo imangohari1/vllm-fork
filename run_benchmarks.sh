@@ -1,7 +1,9 @@
-GPU=true
-HPU=false
+GPU=false
+HPU=true
 VLLM_DIR=$(realpath .)
 RunSpecDecode=true
+RunOnline=false
+RunOffline=true
 
 if $GPU; then
         tmdl=/scratch/users/sgohari/others/ai/models/llama3.1-8b-instruct
@@ -53,7 +55,7 @@ if $RunOnline; then
         for i in {1..3}; do echo $cmd && eval $cmd; done
 fi
 
-if $RunOfline; then
+if $RunOffline; then
         cd /tmp
         cp $VLLM_DIR/offline_inference.py .
         if $RunSpecDecode; then
