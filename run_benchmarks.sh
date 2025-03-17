@@ -13,7 +13,8 @@ fi
 if $HPU; then
         tmdl=meta-llama/Meta-Llama-3-8B-Instruct
         dmdl=meta-llama/Llama-3.2-3B-Instruct
-        VLLMFLAGS="  VLLM_SKIP_WARMUP=true VLLM_CONTIGUOUS_PA=false"
+        VLLMFLAGS="  VLLM_SKIP_WARMUP=true "
+        if $RunSpecDecode; then VLLMFLAGS="$VLLMFLAGS  VLLM_CONTIGUOUS_PA=false"; fi
         pip install datasets -q
 fi
 
@@ -26,8 +27,8 @@ if $RunOnline; then
         if $RunSpecDecode; then
                 cmd="$VLLMFLAGS  python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000 --model $tmdl --seed 42 -tp 1 --speculative_model $dmdl --num_speculative_tokens 5 --gpu_memory_utilization 0.9 &"
         else
-                # we run the draft model to get basic values
-                cmd="$VLLMFLAGS  python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000 --model $dmdl --seed 42 -tp 1 --gpu_memory_utilization 0.9 &"
+                # we run the trager/draft model to get basic values
+                cmd="$VLLMFLAGS  python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000 --model $tmdl --seed 42 -tp 1 --gpu_memory_utilization 0.9 &"
         fi
         echo $cmd && eval $cmd
 
@@ -46,8 +47,8 @@ if $RunOnline; then
         if $RunSpecDecode; then
                 cmd="python benchmark_serving.py --port 8000 --backend vllm --model $tmdl --dataset-name sharegpt --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json --request-rate 1 --num-prompts 128"
         else
-                # we run the draft model to get basic values
-                cmd="python benchmark_serving.py --port 8000 --backend vllm --model $dmdl --dataset-name sharegpt --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json --request-rate 1 --num-prompts 128"
+                # we run the target/draft model to get basic values
+                cmd="python benchmark_serving.py --port 8000 --backend vllm --model $tmdl --dataset-name sharegpt --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json --request-rate 1 --num-prompts 128"
         fi
         for i in {1..3}; do echo $cmd && eval $cmd; done
 fi
@@ -59,8 +60,8 @@ if $RunOfline; then
                 OFFLINEARGS=" -tmdl $tmdl -dmdl $dmdl -esd"
         else
                 # we run the draft model to get basic values
-                OFFLINEARGS=" -tmdl $dmdl"
+                OFFLINEARGS=" -tmdl $tmdl"
         fi
-        cmd="$VLLMFLAGS  python  offline_inference.py $OFLINEARGS"
+        cmd="$VLLMFLAGS  python  offline_inference.py $OFFLINEARGS"
         echo $cmd && eval $cmd
 fi
